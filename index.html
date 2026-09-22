@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>See & Say: 圖片輪播</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 h-screen flex flex-col overflow-hidden select-none font-sans">
+
+  <!-- 頂部精簡控制列：僅保留主題、速度、暫停控制 -->
+  <header class="bg-slate-900/90 backdrop-blur border-b border-slate-800 px-5 py-3 flex items-center justify-between gap-4 z-20">
+    <!-- 主題切換 -->
+    <div class="flex items-center gap-2.5">
+      <label for="themeSelect" class="text-xs text-slate-400 font-medium">主題：</label>
+      <select id="themeSelect" class="bg-slate-800 text-amber-300 font-bold text-sm rounded-lg px-3 py-1.5 border border-slate-700 outline-none focus:ring-2 focus:ring-amber-400 cursor-pointer">
+        <option value="mid-autumn">🥮 中秋節</option>
+        <option value="food-snacks">🥪 美食點心</option>
+      </select>
+    </div>
+
+    <!-- 速度設定與暫停按鈕 -->
+    <div class="flex items-center gap-4">
+      <!-- 輪播速度滑桿 -->
+      <div class="flex items-center gap-2 bg-slate-800/80 px-3 py-1.5 rounded-lg border border-slate-700">
+        <label for="speedSlider" class="text-xs text-slate-400">速度</label>
+        <input type="range" id="speedSlider" min="0.5" max="8" step="0.5" value="2.5" class="w-24 h-1.5 accent-amber-400 cursor-pointer">
+        <span id="speedVal" class="text-xs font-mono text-amber-400 w-8">2.5s</span>
+      </div>
+
+      <!-- 暫停 / 繼續 -->
+      <button id="btnTogglePlay" class="px-4 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-xs transition">
+        ⏸ 暫停
+      </button>
+
+      <!-- 隨機下一張 -->
+      <button id="btnNext" class="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-xs font-medium transition" title="快捷鍵: 方向鍵 →">
+        隨機下一個 ❯
+      </button>
+
+      <!-- 全螢幕 -->
+      <button id="btnFullscreen" class="p-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-xs" title="全螢幕 (F)">
+        ⛶
+      </button>
+    </div>
+  </header>
+
+  <!-- 倒數計時進度條 -->
+  <div class="w-full bg-slate-900 h-1.5 relative overflow-hidden">
+    <div id="countdownBar" class="h-full bg-amber-400 transition-none w-0"></div>
+  </div>
+
+  <!-- 中央畫面 (一次展示單張大圖) -->
+  <main id="stage" class="flex-1 relative flex items-center justify-center p-8">
+    <canvas id="displayCanvas" class="max-w-[85vw] max-h-[75vh] object-contain drop-shadow-2xl cursor-pointer transition-transform active:scale-95"></canvas>
+
+    <!-- 底部當前圖片標籤與題號資訊 -->
+    <div class="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-3 bg-slate-900/80 backdrop-blur px-5 py-2 rounded-full border border-slate-800 text-xs text-slate-300 pointer-events-none shadow-lg">
+      <span id="itemCounter" class="font-mono text-slate-400">0 / 0</span>
+      <span class="w-1 h-1 bg-slate-600 rounded-full"></span>
+      <span id="itemName" class="font-bold text-amber-300 text-base tracking-wide">載入中...</span>
+    </div>
+  </main>
+
+  <script>
+    /* ==========================================================================
+       1. GitHub 圖庫參數設定（請在此填入您的 GitHub 帳號與倉庫名稱）
+       ========================================================================== */
+    const GITHUB_CONFIG = {
+      owner: "your-username",      // 👈 請填入您的 GitHub 帳號
+      repo: "your-repo-name",      // 👈 請填入您的倉庫名稱
+      branch: "main",
+      paths: {
+        "mid-autumn": "mid-autumn",  // 倉庫內中秋節圖片的資料夾名稱
+        "food-snacks": "food-snacks" // 倉庫內美食點心圖片的資料夾名稱
+      }
+    };
+
+    /* 運行狀態 */
+    let imageLists = { "mid-autumn": [], "food-snacks": [] };
+    let currentTheme = "mid-autumn";
+    let currentIndex = -1;
+    let isPlaying = true;
+    let intervalSec = 2.5;
+    let timerId = null;
+    let countdownStart = 0;
+
+    /* DOM 節點 */
+    const themeSelect = document.getElementById("themeSelect");
+    const speedSlider = document.getElementById("speedSlider");
+    const speedVal = document.getElementById("speedVal");
+    const btnTogglePlay = document.getElementById("btnTogglePlay");
+    const btnNext = document.getElementById("btnNext");
+    const btnFullscreen = document.getElementById("btnFullscreen");
+    const countdownBar = document.getElementById("countdownBar");
+    const displayCanvas = document.getElementById("displayCanvas");
+    const itemCounter = document.getElementById("itemCounter");
+    const itemName = document.getElementById("itemName");
+
+    /* ==========================================================================
+       2. 後台自動白底去背演算法 (Flood-fill 泛洪填充)
+       說明：由圖片周圍邊界向內偵測純白底色，掏空為透明，保留物品本身的內部白色
+       ========================================================================== */
+    function autoRemoveWhiteBackground(img) {
+      const w = img.naturalWidth || img.width;
+      const h = img.naturalHeight || img.height;
+      displayCanvas.width = w;
+      displayCanvas.height = h;
+
+      const ctx = displayCanvas.getContext("2d", { willReadFrequently: true });
+      ctx.clearRect(0, 0, w, h);
+      ctx.drawImage(img, 0, 0);
+
+      const imgData = ctx.getImageData(0, 0, w, h);
+      const data = imgData.data;
+      const visited = new Uint8Array(w * h);
+      const tolerance = 32; // 預設最適去背容差
+
+      function isWhiteLike(r, g, b) {
+        return (r >= 255 - tolerance && g >= 255 - tolerance && b >= 255 - tolerance);
+      }
+
+      const queue = [];
+      function addSeed(x, y) {
+        const idx = y * w + x;
+        if (!visited[idx]) {
+          visited[idx] = 1;
+          const p = idx * 4;
+          if (isWhiteLike(data[p], data[p+1], data[p+2])) {
+            queue.push(x, y);
+          }
+        }
+      }
+
+      for (let x = 0; x < w; x++) { addSeed(x, 0); addSeed(x, h - 1); }
+      for (let y = 0; y < h; y++) { addSeed(0, y); addSeed(w - 1, y); }
+
+      let head = 0;
+      while (head < queue.length) {
+        const cx = queue[head++];
+        const cy = queue[head++];
+        data[(cy * w + cx) * 4 + 3] = 0; // 將底色 Alpha 設為透明
+
+        const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+        for (let i = 0; i < 4; i++) {
+          const nx = cx + dirs[i][0];
+          const ny = cy + dirs[i][1];
+          if (nx >= 0 && nx < w && ny >= 0 && ny < h) {
+            const nIdx = ny * w + nx;
+            if (!visited[nIdx]) {
+              visited[nIdx] = 1;
+              const np = nIdx * 4;
+              if (isWhiteLike(data[np], data[np+1], data[np+2])) {
+                queue.push(nx, ny);
+              }
+            }
+          }
+        }
+      }
+      ctx.putImageData(imgData, 0, 0);
+    }
+
+    /* ==========================================================================
+       3. 抓取 GitHub 倉庫圖片
+       ========================================================================== */
+    async function fetchImagesForTheme(themeKey) {
+      const folder = GITHUB_CONFIG.paths[themeKey];
+      const apiUrl = `https://api.github.com/repos/${GITHUB_CONFIG.owner}/${GITHUB_CONFIG.repo}/contents/${folder}?ref=${GITHUB_CONFIG.branch}`;
+
+      try {
+        const res = await fetch(apiUrl);
+        if (!res.ok) throw new Error("讀取失敗");
+        const files = await res.json();
+        
+        const validExts = [".png", ".jpg", ".jpeg", ".webp", ".svg"];
+        const filtered = files.filter(f => f.type === "file" && validExts.some(ext => f.name.toLowerCase().endsWith(ext)));
+
+        if (filtered.length === 0) throw new Error("目錄內無圖片");
+
+        imageLists[themeKey] = filtered.map(f => {
+          const rawName = f.name.substring(0, f.name.lastIndexOf('.')) || f.name;
+          return {
+            name: decodeURIComponent(rawName),
+            url: `https://cdn.jsdelivr.net/gh/${GITHUB_CONFIG.owner}/${GITHUB_CONFIG.repo}@${GITHUB_CONFIG.branch}/${f.path}`
+          };
+        });
+      } catch (err) {
+        // 若 GitHub 尚未填寫正確帳號，以內建模擬題目做示範
+        loadFallbackImages(themeKey);
+      }
+    }
+
+    function loadFallbackImages(themeKey) {
+      if (themeKey === "mid-autumn") {
+        imageLists["mid-autumn"] = ["月餅", "柚子", "玉兔", "嫦娥", "烤肉", "天燈"].map(name => ({
+          name, url: makeDemoSvg(name, "#f59e0b")
+        }));
+      } else {
+        imageLists["food-snacks"] = ["蒟蒻", "茶葉蛋", "手搖飲", "雞塊", "蘋果派", "馬花糋"].map(name => ({
+          name, url: makeDemoSvg(name, "#ef4444")
+        }));
+      }
+    }
+
+    function makeDemoSvg(label, color) {
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="600" height="600" viewBox="0 0 600 600">
+        <rect width="600" height="600" fill="#ffffff" />
+        <g stroke="#0f172a" stroke-width="12" stroke-linejoin="round">
+          <ellipse cx="300" cy="300" rx="180" ry="160" fill="${color}" />
+          <circle cx="240" cy="270" r="14" fill="#0f172a"/>
+          <circle cx="360" cy="270" r="14" fill="#0f172a"/>
+          <path d="M 280 320 Q 300 345 320 320" fill="none" stroke="#0f172a" stroke-width="8" stroke-linecap="round"/>
+          <ellipse cx="210" cy="300" rx="16" ry="10" fill="#fb7185" opacity="0.6"/>
+          <ellipse cx="390" cy="300" rx="16" ry="10" fill="#fb7185" opacity="0.6"/>
+        </g>
+        <text x="300" y="520" font-size="38" font-weight="900" fill="#0f172a" text-anchor="middle" font-family="sans-serif">${label}</text>
+      </svg>`;
+      return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+    }
+
+    /* ==========================================================================
+       4. 跑馬燈輪播邏輯
+       ========================================================================== */
+    function renderCurrentItem() {
+      const list = imageLists[currentTheme] || [];
+      if (list.length === 0) return;
+
+      const item = list[currentIndex];
+      itemName.textContent = item.name;
+      itemCounter.textContent = `${currentIndex + 1} / ${list.length}`;
+
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => autoRemoveWhiteBackground(img); // 後台靜默去背
+      img.src = item.url;
+    }
+
+    function pickRandomNext() {
+      const list = imageLists[currentTheme] || [];
+      if (list.length === 0) return;
+
+      if (list.length === 1) {
+        currentIndex = 0;
+      } else {
+        let nextIdx = Math.floor(Math.random() * list.length);
+        while (nextIdx === currentIndex) {
+          nextIdx = Math.floor(Math.random() * list.length);
+        }
+        currentIndex = nextIdx;
+      }
+      renderCurrentItem();
+      resetCountdown();
+    }
+
+    function resetCountdown() {
+      countdownStart = performance.now();
+      if (timerId) clearTimeout(timerId);
+
+      if (isPlaying) {
+        timerId = setTimeout(pickRandomNext, intervalSec * 1000);
+      }
+    }
+
+    function updateProgressAnim(now) {
+      if (isPlaying && intervalSec > 0) {
+        const elapsed = now - countdownStart;
+        const progress = Math.min(elapsed / (intervalSec * 1000), 1);
+        countdownBar.style.width = (progress * 100) + "%";
+      } else if (!isPlaying) {
+        countdownBar.style.width = "0%";
+      }
+      requestAnimationFrame(updateProgressAnim);
+    }
+
+    function togglePlay() {
+      isPlaying = !isPlaying;
+      btnTogglePlay.textContent = isPlaying ? "⏸ 暫停" : "▶ 繼續";
+      btnTogglePlay.className = isPlaying
+        ? "px-4 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-xs transition"
+        : "px-4 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-lg text-xs transition";
+      resetCountdown();
+    }
+
+    /* ==========================================================================
+       5. 事件監聽
+       ========================================================================== */
+    themeSelect.addEventListener("change", async (e) => {
+      currentTheme = e.target.value;
+      if (!imageLists[currentTheme] || imageLists[currentTheme].length === 0) {
+        await fetchImagesForTheme(currentTheme);
+      }
+      currentIndex = 0;
+      pickRandomNext();
+    });
+
+    speedSlider.addEventListener("input", (e) => {
+      intervalSec = parseFloat(e.target.value);
+      speedVal.textContent = intervalSec.toFixed(1) + "s";
+      resetCountdown();
+    });
+
+    btnTogglePlay.addEventListener("click", togglePlay);
+    btnNext.addEventListener("click", pickRandomNext);
+    displayCanvas.addEventListener("click", pickRandomNext);
+
+    btnFullscreen.addEventListener("click", () => {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(() => {});
+      } else {
+        document.exitFullscreen().catch(() => {});
+      }
+    });
+
+    window.addEventListener("keydown", (e) => {
+      if (e.code === "Space") { e.preventDefault(); togglePlay(); }
+      else if (e.code === "ArrowRight") { e.preventDefault(); pickRandomNext(); }
+      else if (e.key === "f" || e.key === "F") { btnFullscreen.click(); }
+    });
+
+    // 初始化啟動
+    async function init() {
+      await fetchImagesForTheme("mid-autumn");
+      pickRandomNext();
+      requestAnimationFrame(updateProgressAnim);
+    }
+    init();
+  </script>
+</body>
+</html>
