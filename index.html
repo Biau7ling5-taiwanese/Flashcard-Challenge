@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>See & Say: 跑馬燈看圖念名</title>
+  <title>See & Say: 看圖念名挑戰</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
-    /* 最佳化圖片渲染，確保平滑銳利 */
+    /* 高解析度抗鋸齒優化 */
     canvas {
       image-rendering: -webkit-optimize-contrast;
       image-rendering: crisp-edges;
@@ -15,8 +15,8 @@
 </head>
 <body class="bg-slate-950 text-slate-100 h-screen flex flex-col overflow-hidden select-none font-sans">
 
-  <!-- 頂部控制列：僅保留主題切換、速度與暫停控制 -->
-  <header class="bg-slate-900/90 backdrop-blur border-b border-slate-800 px-6 py-3 flex items-center justify-between gap-4 z-20">
+  <!-- 頂部控制面板 -->
+  <header class="bg-slate-900/90 backdrop-blur border-b border-slate-800 px-6 py-3 flex flex-wrap items-center justify-between gap-4 z-20">
     <!-- 主題切換 -->
     <div class="flex items-center gap-2.5">
       <label for="themeSelect" class="text-xs text-slate-400 font-medium">主題：</label>
@@ -26,23 +26,28 @@
       </select>
     </div>
 
-    <!-- 速度設定與暫停播放按鈕 -->
-    <div class="flex items-center gap-4">
+    <!-- 控制按鈕組：速度、開始、暫停、再玩一次 -->
+    <div class="flex items-center gap-3">
       <!-- 輪播速度滑桿 -->
       <div class="flex items-center gap-2 bg-slate-800/80 px-3 py-1.5 rounded-lg border border-slate-700">
-        <label for="speedSlider" class="text-xs text-slate-400">輪播速度</label>
-        <input type="range" id="speedSlider" min="0.5" max="8" step="0.5" value="2.5" class="w-24 h-1.5 accent-amber-400 cursor-pointer">
+        <label for="speedSlider" class="text-xs text-slate-400">速度</label>
+        <input type="range" id="speedSlider" min="0.5" max="8" step="0.5" value="2.5" class="w-20 md:w-24 h-1.5 accent-amber-400 cursor-pointer">
         <span id="speedVal" class="text-xs font-mono text-amber-400 w-8">2.5s</span>
       </div>
 
-      <!-- 暫停 / 繼續 -->
-      <button id="btnTogglePlay" class="px-4 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-xs transition">
+      <!-- 1. 開始按鈕 -->
+      <button id="btnStart" class="px-4 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-lg text-xs transition shadow flex items-center gap-1">
+        ▶ 開始
+      </button>
+
+      <!-- 2. 暫停 / 繼續按鈕 -->
+      <button id="btnTogglePause" disabled class="px-4 py-1.5 bg-slate-800 text-slate-500 border border-slate-700 font-bold rounded-lg text-xs transition cursor-not-allowed flex items-center gap-1">
         ⏸ 暫停
       </button>
 
-      <!-- 隨機下一張 -->
-      <button id="btnNext" class="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-xs font-medium transition" title="快捷鍵: 方向鍵 →">
-        隨機下一個 ❯
+      <!-- 3. 再玩一次按鈕 -->
+      <button id="btnRestart" class="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 font-bold rounded-lg text-xs transition flex items-center gap-1">
+        🔄 再玩一次
       </button>
 
       <!-- 全螢幕 (F) -->
@@ -52,14 +57,33 @@
     </div>
   </header>
 
-  <!-- 中央舞台：僅呈現高畫質去背圖片，無任何干擾文字與檔名 -->
+  <!-- 中央主舞台：僅展示單張高解析去背圖，無文字無倒數條 -->
   <main id="stage" class="flex-1 relative flex items-center justify-center p-6 md:p-12 overflow-hidden">
-    <canvas id="displayCanvas" class="max-w-[90vw] max-h-[82vh] object-contain drop-shadow-2xl cursor-pointer transition-transform active:scale-95"></canvas>
+    
+    <!-- 待機歡迎畫面 -->
+    <div id="readyPrompt" class="text-center space-y-3 z-10">
+      <div class="text-6xl animate-bounce">🎯</div>
+      <h2 class="text-xl font-bold text-slate-200">準備好挑戰了嗎？</h2>
+      <p class="text-xs text-slate-400">點擊上方「開始」按鈕，看圖片大聲念出名字！</p>
+    </div>
+
+    <!-- 圖片畫布 (遊戲中展示) -->
+    <canvas id="displayCanvas" class="hidden max-w-[90vw] max-h-[82vh] object-contain drop-shadow-2xl cursor-pointer transition-transform active:scale-95"></canvas>
+
+    <!-- 挑戰結束結算畫面 -->
+    <div id="finishOverlay" class="absolute inset-0 bg-slate-950/85 backdrop-blur-sm z-30 hidden flex flex-col items-center justify-center space-y-4">
+      <div class="text-6xl animate-pulse">🎉</div>
+      <h2 class="text-2xl md:text-3xl font-black text-amber-300 tracking-wider">本輪挑戰完成！</h2>
+      <p class="text-sm text-slate-300">所有圖片皆已隨機輪播完畢。</p>
+      <button id="btnOverlayRestart" class="mt-4 px-6 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold rounded-xl text-sm transition shadow-lg flex items-center gap-2 transform active:scale-95">
+        🔄 再玩一次
+      </button>
+    </div>
   </main>
 
   <script>
     /* ==========================================================================
-       1. GitHub 圖庫參數設定（直接對應您的 GitHub 儲存庫結構）
+       1. GitHub 圖庫參數設定（綁定您的倉庫）
        ========================================================================== */
     const GITHUB_CONFIG = {
       owner: "Biau7ling5-taiwanese",
@@ -71,10 +95,14 @@
       }
     };
 
-    let imageLists = { "moon_festival": [], "food": [] };
+    // 原始圖片資料庫
+    let imageSources = { "moon_festival": [], "food": [] };
+    // 當前回合的隨機抽題池（隨機洗牌後的佇列）
+    let playQueue = [];
     let currentTheme = "moon_festival";
-    let currentIndex = -1;
-    let isPlaying = true;
+
+    // 遊戲狀態機: 'ready' (就緒) | 'playing' (進行中) | 'paused' (暫停) | 'finished' (已結束)
+    let gameState = 'ready';
     let intervalSec = 2.5;
     let timerId = null;
 
@@ -82,20 +110,60 @@
     const themeSelect = document.getElementById("themeSelect");
     const speedSlider = document.getElementById("speedSlider");
     const speedVal = document.getElementById("speedVal");
-    const btnTogglePlay = document.getElementById("btnTogglePlay");
-    const btnNext = document.getElementById("btnNext");
+    const btnStart = document.getElementById("btnStart");
+    const btnTogglePause = document.getElementById("btnTogglePause");
+    const btnRestart = document.getElementById("btnRestart");
     const btnFullscreen = document.getElementById("btnFullscreen");
     const displayCanvas = document.getElementById("displayCanvas");
+    const readyPrompt = document.getElementById("readyPrompt");
+    const finishOverlay = document.getElementById("finishOverlay");
+    const btnOverlayRestart = document.getElementById("btnOverlayRestart");
 
     /* ==========================================================================
-       2. 高畫質適配與智慧白底去背演算法
+       2. 陣列隨機洗牌演算法 (Fisher-Yates Shuffle 確保隨機且不重複)
+       ========================================================================== */
+    function shuffle(array) {
+      const arr = [...array];
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      return arr;
+    }
+
+    /* ==========================================================================
+       3. 抓取 GitHub 倉庫圖片
+       ========================================================================== */
+    async function fetchImagesForTheme(themeKey) {
+      const folder = GITHUB_CONFIG.paths[themeKey];
+      const apiUrl = `https://api.github.com/repos/${GITHUB_CONFIG.owner}/${GITHUB_CONFIG.repo}/contents/${folder}?ref=${GITHUB_CONFIG.branch}`;
+
+      try {
+        const res = await fetch(apiUrl);
+        if (!res.ok) throw new Error("GitHub 連線失敗");
+        const files = await res.json();
+
+        const validExts = [".png", ".jpg", ".jpeg", ".webp", ".svg"];
+        const filtered = files.filter(f => f.type === "file" && validExts.some(ext => f.name.toLowerCase().endsWith(ext)));
+
+        if (filtered.length === 0) throw new Error("資料夾內未發現圖片");
+
+        imageSources[themeKey] = filtered.map(f => ({
+          url: `https://cdn.jsdelivr.net/gh/${GITHUB_CONFIG.owner}/${GITHUB_CONFIG.repo}@${GITHUB_CONFIG.branch}/${f.path}`
+        }));
+      } catch (err) {
+        console.warn("GitHub 載入失敗，載入備用示意圖", err);
+      }
+    }
+
+    /* ==========================================================================
+       4. 高解析度渲染與自動白底去背 (Flood-Fill 邊界演算法)
        ========================================================================== */
     function renderHighResImageWithKeyout(img) {
       const naturalW = img.naturalWidth || img.width;
       const naturalH = img.naturalHeight || img.height;
       if (!naturalW || !naturalH) return;
 
-      // 步驟 A: 在離線 Canvas 執行高精度白底掏空 (Flood-fill 泛洪填充)
       const offCanvas = document.createElement("canvas");
       offCanvas.width = naturalW;
       offCanvas.height = naturalH;
@@ -105,7 +173,7 @@
       const imgData = offCtx.getImageData(0, 0, naturalW, naturalH);
       const data = imgData.data;
       const visited = new Uint8Array(naturalW * naturalH);
-      const tolerance = 32; // 去背容差
+      const tolerance = 32;
 
       function isWhiteLike(r, g, b) {
         return (r >= 255 - tolerance && g >= 255 - tolerance && b >= 255 - tolerance);
@@ -123,7 +191,6 @@
         }
       }
 
-      // 將四周邊界設為去背搜尋起點
       for (let x = 0; x < naturalW; x++) { addSeed(x, 0); addSeed(x, naturalH - 1); }
       for (let y = 0; y < naturalH; y++) { addSeed(0, y); addSeed(naturalW - 1, y); }
 
@@ -151,115 +218,141 @@
       }
       offCtx.putImageData(imgData, 0, 0);
 
-      // 步驟 B: 適配設備像素比 (DevicePixelRatio)，以 2x~3x 密度輸出，徹底杜絕大螢幕模糊
+      // Retina / 投影機 2x 高解析度輸出
       const dpr = Math.max(window.devicePixelRatio || 1, 2);
       displayCanvas.width = naturalW * dpr;
       displayCanvas.height = naturalH * dpr;
-
-      // 保持原有比例樣式
       displayCanvas.style.aspectRatio = `${naturalW} / ${naturalH}`;
 
       const ctx = displayCanvas.getContext("2d");
       ctx.clearRect(0, 0, displayCanvas.width, displayCanvas.height);
       ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = "high"; // 最高品質平滑縮放
+      ctx.imageSmoothingQuality = "high";
       ctx.scale(dpr, dpr);
       ctx.drawImage(offCanvas, 0, 0, naturalW, naturalH);
     }
 
     /* ==========================================================================
-       3. 抓取 GitHub 倉庫圖片
+       5. 遊戲流程控制核心 (開始、暫停、隨機不重複、播完結束、再玩一次)
        ========================================================================== */
-    async function fetchImagesForTheme(themeKey) {
-      const folder = GITHUB_CONFIG.paths[themeKey];
-      const apiUrl = `https://api.github.com/repos/${GITHUB_CONFIG.owner}/${GITHUB_CONFIG.repo}/contents/${folder}?ref=${GITHUB_CONFIG.branch}`;
 
-      try {
-        const res = await fetch(apiUrl);
-        if (!res.ok) throw new Error("GitHub 連線失敗");
-        const files = await res.json();
+    // 啟動或重開一輪新回合
+    function startNewRound() {
+      const sourceList = imageSources[currentTheme] || [];
+      if (sourceList.length === 0) return;
 
-        const validExts = [".png", ".jpg", ".jpeg", ".webp", ".svg"];
-        const filtered = files.filter(f => f.type === "file" && validExts.some(ext => f.name.toLowerCase().endsWith(ext)));
+      // 隨機洗牌，填裝本回合專屬的隨機佇列
+      playQueue = shuffle(sourceList);
 
-        if (filtered.length === 0) throw new Error("資料夾內未發現圖片");
+      finishOverlay.classList.add("hidden");
+      readyPrompt.classList.add("hidden");
+      displayCanvas.classList.remove("hidden");
 
-        imageLists[themeKey] = filtered.map(f => ({
-          url: `https://cdn.jsdelivr.net/gh/${GITHUB_CONFIG.owner}/${GITHUB_CONFIG.repo}@${GITHUB_CONFIG.branch}/${f.path}`
-        }));
-      } catch (err) {
-        console.warn("GitHub 載入失敗，載入備用示意圖", err);
-      }
+      gameState = 'playing';
+      updateUIButtons();
+
+      // 立即秀出第一張
+      showNextImage();
     }
 
-    /* ==========================================================================
-       4. 跑馬燈輪播邏輯
-       ========================================================================== */
-    function renderCurrentItem() {
-      const list = imageLists[currentTheme] || [];
-      if (list.length === 0) return;
+    // 秀出佇列下一張圖片
+    function showNextImage() {
+      if (gameState !== 'playing') return;
 
-      const item = list[currentIndex];
+      // 若佇列空了，代表本回合所有圖片已不重複播完，結束一輪
+      if (playQueue.length === 0) {
+        endRound();
+        return;
+      }
+
+      // 從佇列前端取出下一張 (保證不重複)
+      const currentItem = playQueue.shift();
+
       const img = new Image();
       img.crossOrigin = "anonymous";
       img.onload = () => renderHighResImageWithKeyout(img);
-      img.src = item.url;
+      img.src = currentItem.url;
+
+      // 設定下一張的計時器
+      clearTimeout(timerId);
+      timerId = setTimeout(showNextImage, intervalSec * 1000);
     }
 
-    function pickRandomNext() {
-      const list = imageLists[currentTheme] || [];
-      if (list.length === 0) return;
+    // 結束本回合
+    function endRound() {
+      gameState = 'finished';
+      clearTimeout(timerId);
+      updateUIButtons();
+      finishOverlay.classList.remove("hidden");
+    }
 
-      if (list.length === 1) {
-        currentIndex = 0;
-      } else {
-        let nextIdx = Math.floor(Math.random() * list.length);
-        while (nextIdx === currentIndex) {
-          nextIdx = Math.floor(Math.random() * list.length);
-        }
-        currentIndex = nextIdx;
+    // 暫停 / 繼續切換
+    function togglePause() {
+      if (gameState === 'playing') {
+        gameState = 'paused';
+        clearTimeout(timerId);
+      } else if (gameState === 'paused') {
+        gameState = 'playing';
+        showNextImage();
       }
-      renderCurrentItem();
-      resetTimer();
+      updateUIButtons();
     }
 
-    function resetTimer() {
-      if (timerId) clearTimeout(timerId);
-      if (isPlaying) {
-        timerId = setTimeout(pickRandomNext, intervalSec * 1000);
+    // 更新各按鈕外觀與狀態
+    function updateUIButtons() {
+      if (gameState === 'ready') {
+        btnStart.disabled = false;
+        btnStart.className = "px-4 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-lg text-xs transition shadow cursor-pointer";
+        btnTogglePause.disabled = true;
+        btnTogglePause.className = "px-4 py-1.5 bg-slate-800 text-slate-500 border border-slate-700 font-bold rounded-lg text-xs transition cursor-not-allowed";
+        btnTogglePause.textContent = "⏸ 暫停";
+      } else if (gameState === 'playing') {
+        btnStart.disabled = true;
+        btnStart.className = "px-4 py-1.5 bg-slate-800 text-slate-500 border border-slate-700 font-bold rounded-lg text-xs cursor-not-allowed";
+        btnTogglePause.disabled = false;
+        btnTogglePause.className = "px-4 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-xs transition cursor-pointer";
+        btnTogglePause.textContent = "⏸ 暫停";
+      } else if (gameState === 'paused') {
+        btnStart.disabled = true;
+        btnStart.className = "px-4 py-1.5 bg-slate-800 text-slate-500 border border-slate-700 font-bold rounded-lg text-xs cursor-not-allowed";
+        btnTogglePause.disabled = false;
+        btnTogglePause.className = "px-4 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-lg text-xs transition cursor-pointer";
+        btnTogglePause.textContent = "▶ 繼續";
+      } else if (gameState === 'finished') {
+        btnStart.disabled = false;
+        btnStart.className = "px-4 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-lg text-xs transition shadow cursor-pointer";
+        btnTogglePause.disabled = true;
+        btnTogglePause.className = "px-4 py-1.5 bg-slate-800 text-slate-500 border border-slate-700 font-bold rounded-lg text-xs cursor-not-allowed";
+        btnTogglePause.textContent = "⏸ 暫停";
       }
-    }
-
-    function togglePlay() {
-      isPlaying = !isPlaying;
-      btnTogglePlay.textContent = isPlaying ? "⏸ 暫停" : "▶ 繼續";
-      btnTogglePlay.className = isPlaying
-        ? "px-4 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-xs transition"
-        : "px-4 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-lg text-xs transition";
-      resetTimer();
     }
 
     /* ==========================================================================
-       5. 事件監聽
+       6. 事件監聽
        ========================================================================== */
+    btnStart.addEventListener("click", startNewRound);
+    btnTogglePause.addEventListener("click", togglePause);
+    btnRestart.addEventListener("click", startNewRound);
+    btnOverlayRestart.addEventListener("click", startNewRound);
+
     themeSelect.addEventListener("change", async (e) => {
       currentTheme = e.target.value;
-      if (!imageLists[currentTheme] || imageLists[currentTheme].length === 0) {
+      clearTimeout(timerId);
+      gameState = 'ready';
+      readyPrompt.classList.remove("hidden");
+      displayCanvas.classList.add("hidden");
+      finishOverlay.classList.add("hidden");
+      updateUIButtons();
+
+      if (!imageSources[currentTheme] || imageSources[currentTheme].length === 0) {
         await fetchImagesForTheme(currentTheme);
       }
-      currentIndex = 0;
-      pickRandomNext();
     });
 
     speedSlider.addEventListener("input", (e) => {
       intervalSec = parseFloat(e.target.value);
       speedVal.textContent = intervalSec.toFixed(1) + "s";
-      resetTimer();
     });
-
-    btnTogglePlay.addEventListener("click", togglePlay);
-    btnNext.addEventListener("click", pickRandomNext);
-    displayCanvas.addEventListener("click", pickRandomNext);
 
     btnFullscreen.addEventListener("click", () => {
       if (!document.fullscreenElement) {
@@ -269,16 +362,26 @@
       }
     });
 
+    // 快捷鍵：空白鍵暫停/繼續、R鍵重玩
     window.addEventListener("keydown", (e) => {
-      if (e.code === "Space") { e.preventDefault(); togglePlay(); }
-      else if (e.code === "ArrowRight") { e.preventDefault(); pickRandomNext(); }
-      else if (e.key === "f" || e.key === "F") { btnFullscreen.click(); }
+      if (e.code === "Space") {
+        e.preventDefault();
+        if (gameState === 'ready' || gameState === 'finished') {
+          startNewRound();
+        } else {
+          togglePause();
+        }
+      } else if (e.key === "r" || e.key === "R") {
+        startNewRound();
+      } else if (e.key === "f" || e.key === "F") {
+        btnFullscreen.click();
+      }
     });
 
-    // 啟動程式
+    // 頁面初次載入
     async function init() {
+      updateUIButtons();
       await fetchImagesForTheme("moon_festival");
-      pickRandomNext();
     }
     init();
   </script>
