@@ -3,12 +3,19 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Flashcard Challenge</title>
+  <title>See & Say: 跑馬燈看圖念名</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* 最佳化圖片渲染，確保平滑銳利 */
+    canvas {
+      image-rendering: -webkit-optimize-contrast;
+      image-rendering: crisp-edges;
+    }
+  </style>
 </head>
 <body class="bg-slate-950 text-slate-100 h-screen flex flex-col overflow-hidden select-none font-sans">
 
-  <!-- 頂部控制列：僅保留主題、速度調整、暫停控制 -->
+  <!-- 頂部控制列：僅保留主題切換、速度與暫停控制 -->
   <header class="bg-slate-900/90 backdrop-blur border-b border-slate-800 px-6 py-3 flex items-center justify-between gap-4 z-20">
     <!-- 主題切換 -->
     <div class="flex items-center gap-2.5">
@@ -38,28 +45,21 @@
         隨機下一個 ❯
       </button>
 
-      <!-- 全螢幕 -->
+      <!-- 全螢幕 (F) -->
       <button id="btnFullscreen" class="p-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-xs" title="全螢幕 (F)">
         ⛶
       </button>
     </div>
   </header>
 
-  <!-- 中央畫面 (一次展示單張大圖，無干擾倒數條) -->
-  <main id="stage" class="flex-1 relative flex items-center justify-center p-8">
-    <canvas id="displayCanvas" class="max-w-[85vw] max-h-[75vh] object-contain drop-shadow-2xl cursor-pointer transition-transform active:scale-95"></canvas>
-
-    <!-- 底部當前題目名稱與計數 -->
-    <div class="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-3 bg-slate-900/80 backdrop-blur px-5 py-2 rounded-full border border-slate-800 text-xs text-slate-300 pointer-events-none shadow-lg">
-      <span id="itemCounter" class="font-mono text-slate-400">0 / 0</span>
-      <span class="w-1 h-1 bg-slate-600 rounded-full"></span>
-      <span id="itemName" class="font-bold text-amber-300 text-base tracking-wide">載入中...</span>
-    </div>
+  <!-- 中央舞台：僅呈現高畫質去背圖片，無任何干擾文字與檔名 -->
+  <main id="stage" class="flex-1 relative flex items-center justify-center p-6 md:p-12 overflow-hidden">
+    <canvas id="displayCanvas" class="max-w-[90vw] max-h-[82vh] object-contain drop-shadow-2xl cursor-pointer transition-transform active:scale-95"></canvas>
   </main>
 
   <script>
     /* ==========================================================================
-       1. GitHub 圖庫參數設定 (依據您的倉庫截圖精確鎖定)
+       1. GitHub 圖庫參數設定（直接對應您的 GitHub 儲存庫結構）
        ========================================================================== */
     const GITHUB_CONFIG = {
       owner: "Biau7ling5-taiwanese",
@@ -86,26 +86,26 @@
     const btnNext = document.getElementById("btnNext");
     const btnFullscreen = document.getElementById("btnFullscreen");
     const displayCanvas = document.getElementById("displayCanvas");
-    const itemCounter = document.getElementById("itemCounter");
-    const itemName = document.getElementById("itemName");
 
     /* ==========================================================================
-       2. 後台靜默自動白底去背 (Flood-Fill 邊界演算法)
+       2. 高畫質適配與智慧白底去背演算法
        ========================================================================== */
-    function autoRemoveWhiteBackground(img) {
-      const w = img.naturalWidth || img.width;
-      const h = img.naturalHeight || img.height;
-      displayCanvas.width = w;
-      displayCanvas.height = h;
+    function renderHighResImageWithKeyout(img) {
+      const naturalW = img.naturalWidth || img.width;
+      const naturalH = img.naturalHeight || img.height;
+      if (!naturalW || !naturalH) return;
 
-      const ctx = displayCanvas.getContext("2d", { willReadFrequently: true });
-      ctx.clearRect(0, 0, w, h);
-      ctx.drawImage(img, 0, 0);
+      // 步驟 A: 在離線 Canvas 執行高精度白底掏空 (Flood-fill 泛洪填充)
+      const offCanvas = document.createElement("canvas");
+      offCanvas.width = naturalW;
+      offCanvas.height = naturalH;
+      const offCtx = offCanvas.getContext("2d", { willReadFrequently: true });
+      offCtx.drawImage(img, 0, 0);
 
-      const imgData = ctx.getImageData(0, 0, w, h);
+      const imgData = offCtx.getImageData(0, 0, naturalW, naturalH);
       const data = imgData.data;
-      const visited = new Uint8Array(w * h);
-      const tolerance = 32;
+      const visited = new Uint8Array(naturalW * naturalH);
+      const tolerance = 32; // 去背容差
 
       function isWhiteLike(r, g, b) {
         return (r >= 255 - tolerance && g >= 255 - tolerance && b >= 255 - tolerance);
@@ -113,7 +113,7 @@
 
       const queue = [];
       function addSeed(x, y) {
-        const idx = y * w + x;
+        const idx = y * naturalW + x;
         if (!visited[idx]) {
           visited[idx] = 1;
           const p = idx * 4;
@@ -123,21 +123,22 @@
         }
       }
 
-      for (let x = 0; x < w; x++) { addSeed(x, 0); addSeed(x, h - 1); }
-      for (let y = 0; y < h; y++) { addSeed(0, y); addSeed(w - 1, y); }
+      // 將四周邊界設為去背搜尋起點
+      for (let x = 0; x < naturalW; x++) { addSeed(x, 0); addSeed(x, naturalH - 1); }
+      for (let y = 0; y < naturalH; y++) { addSeed(0, y); addSeed(naturalW - 1, y); }
 
       let head = 0;
       while (head < queue.length) {
         const cx = queue[head++];
         const cy = queue[head++];
-        data[(cy * w + cx) * 4 + 3] = 0; // Alpha 設為透明
+        data[(cy * naturalW + cx) * 4 + 3] = 0; // Alpha 設為透明
 
         const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
         for (let i = 0; i < 4; i++) {
           const nx = cx + dirs[i][0];
           const ny = cy + dirs[i][1];
-          if (nx >= 0 && nx < w && ny >= 0 && ny < h) {
-            const nIdx = ny * w + nx;
+          if (nx >= 0 && nx < naturalW && ny >= 0 && ny < naturalH) {
+            const nIdx = ny * naturalW + nx;
             if (!visited[nIdx]) {
               visited[nIdx] = 1;
               const np = nIdx * 4;
@@ -148,11 +149,26 @@
           }
         }
       }
-      ctx.putImageData(imgData, 0, 0);
+      offCtx.putImageData(imgData, 0, 0);
+
+      // 步驟 B: 適配設備像素比 (DevicePixelRatio)，以 2x~3x 密度輸出，徹底杜絕大螢幕模糊
+      const dpr = Math.max(window.devicePixelRatio || 1, 2);
+      displayCanvas.width = naturalW * dpr;
+      displayCanvas.height = naturalH * dpr;
+
+      // 保持原有比例樣式
+      displayCanvas.style.aspectRatio = `${naturalW} / ${naturalH}`;
+
+      const ctx = displayCanvas.getContext("2d");
+      ctx.clearRect(0, 0, displayCanvas.width, displayCanvas.height);
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high"; // 最高品質平滑縮放
+      ctx.scale(dpr, dpr);
+      ctx.drawImage(offCanvas, 0, 0, naturalW, naturalH);
     }
 
     /* ==========================================================================
-       3. 抓取 GitHub 倉庫對應資料夾內的所有圖片
+       3. 抓取 GitHub 倉庫圖片
        ========================================================================== */
     async function fetchImagesForTheme(themeKey) {
       const folder = GITHUB_CONFIG.paths[themeKey];
@@ -168,33 +184,25 @@
 
         if (filtered.length === 0) throw new Error("資料夾內未發現圖片");
 
-        imageLists[themeKey] = filtered.map(f => {
-          const rawName = f.name.substring(0, f.name.lastIndexOf('.')) || f.name;
-          return {
-            name: decodeURIComponent(rawName),
-            url: `https://cdn.jsdelivr.net/gh/${GITHUB_CONFIG.owner}/${GITHUB_CONFIG.repo}@${GITHUB_CONFIG.branch}/${f.path}`
-          };
-        });
+        imageLists[themeKey] = filtered.map(f => ({
+          url: `https://cdn.jsdelivr.net/gh/${GITHUB_CONFIG.owner}/${GITHUB_CONFIG.repo}@${GITHUB_CONFIG.branch}/${f.path}`
+        }));
       } catch (err) {
-        console.warn("GitHub 載入失敗，使用備用本機路徑/預設名稱", err);
-        itemName.textContent = "請確認 GitHub 圖片上傳完成";
+        console.warn("GitHub 載入失敗，載入備用示意圖", err);
       }
     }
 
     /* ==========================================================================
-       4. 輪播跑馬燈控制
+       4. 跑馬燈輪播邏輯
        ========================================================================== */
     function renderCurrentItem() {
       const list = imageLists[currentTheme] || [];
       if (list.length === 0) return;
 
       const item = list[currentIndex];
-      itemName.textContent = item.name;
-      itemCounter.textContent = `${currentIndex + 1} / ${list.length}`;
-
       const img = new Image();
       img.crossOrigin = "anonymous";
-      img.onload = () => autoRemoveWhiteBackground(img);
+      img.onload = () => renderHighResImageWithKeyout(img);
       img.src = item.url;
     }
 
