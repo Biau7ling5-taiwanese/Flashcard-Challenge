@@ -3,27 +3,27 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>See & Say: 圖片輪播</title>
+  <title>Flashcard Challenge</title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-slate-950 text-slate-100 h-screen flex flex-col overflow-hidden select-none font-sans">
 
-  <!-- 頂部精簡控制列：僅保留主題、速度、暫停控制 -->
-  <header class="bg-slate-900/90 backdrop-blur border-b border-slate-800 px-5 py-3 flex items-center justify-between gap-4 z-20">
+  <!-- 頂部控制列：僅保留主題、速度調整、暫停控制 -->
+  <header class="bg-slate-900/90 backdrop-blur border-b border-slate-800 px-6 py-3 flex items-center justify-between gap-4 z-20">
     <!-- 主題切換 -->
     <div class="flex items-center gap-2.5">
       <label for="themeSelect" class="text-xs text-slate-400 font-medium">主題：</label>
       <select id="themeSelect" class="bg-slate-800 text-amber-300 font-bold text-sm rounded-lg px-3 py-1.5 border border-slate-700 outline-none focus:ring-2 focus:ring-amber-400 cursor-pointer">
-        <option value="mid-autumn">🥮 中秋節</option>
-        <option value="food-snacks">🥪 美食點心</option>
+        <option value="moon_festival">🥮 中秋節 (moon_festival)</option>
+        <option value="food">🥪 美食點心 (food)</option>
       </select>
     </div>
 
-    <!-- 速度設定與暫停按鈕 -->
+    <!-- 速度設定與暫停播放按鈕 -->
     <div class="flex items-center gap-4">
       <!-- 輪播速度滑桿 -->
       <div class="flex items-center gap-2 bg-slate-800/80 px-3 py-1.5 rounded-lg border border-slate-700">
-        <label for="speedSlider" class="text-xs text-slate-400">速度</label>
+        <label for="speedSlider" class="text-xs text-slate-400">輪播速度</label>
         <input type="range" id="speedSlider" min="0.5" max="8" step="0.5" value="2.5" class="w-24 h-1.5 accent-amber-400 cursor-pointer">
         <span id="speedVal" class="text-xs font-mono text-amber-400 w-8">2.5s</span>
       </div>
@@ -45,16 +45,11 @@
     </div>
   </header>
 
-  <!-- 倒數計時進度條 -->
-  <div class="w-full bg-slate-900 h-1.5 relative overflow-hidden">
-    <div id="countdownBar" class="h-full bg-amber-400 transition-none w-0"></div>
-  </div>
-
-  <!-- 中央畫面 (一次展示單張大圖) -->
+  <!-- 中央畫面 (一次展示單張大圖，無干擾倒數條) -->
   <main id="stage" class="flex-1 relative flex items-center justify-center p-8">
     <canvas id="displayCanvas" class="max-w-[85vw] max-h-[75vh] object-contain drop-shadow-2xl cursor-pointer transition-transform active:scale-95"></canvas>
 
-    <!-- 底部當前圖片標籤與題號資訊 -->
+    <!-- 底部當前題目名稱與計數 -->
     <div class="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-3 bg-slate-900/80 backdrop-blur px-5 py-2 rounded-full border border-slate-800 text-xs text-slate-300 pointer-events-none shadow-lg">
       <span id="itemCounter" class="font-mono text-slate-400">0 / 0</span>
       <span class="w-1 h-1 bg-slate-600 rounded-full"></span>
@@ -64,26 +59,24 @@
 
   <script>
     /* ==========================================================================
-       1. GitHub 圖庫參數設定（請在此填入您的 GitHub 帳號與倉庫名稱）
+       1. GitHub 圖庫參數設定 (依據您的倉庫截圖精確鎖定)
        ========================================================================== */
     const GITHUB_CONFIG = {
-      owner: "your-username",      // 👈 請填入您的 GitHub 帳號
-      repo: "your-repo-name",      // 👈 請填入您的倉庫名稱
+      owner: "Biau7ling5-taiwanese",
+      repo: "Flashcard-Challenge",
       branch: "main",
       paths: {
-        "mid-autumn": "mid-autumn",  // 倉庫內中秋節圖片的資料夾名稱
-        "food-snacks": "food-snacks" // 倉庫內美食點心圖片的資料夾名稱
+        "moon_festival": "theme/moon_festival",
+        "food": "theme/food"
       }
     };
 
-    /* 運行狀態 */
-    let imageLists = { "mid-autumn": [], "food-snacks": [] };
-    let currentTheme = "mid-autumn";
+    let imageLists = { "moon_festival": [], "food": [] };
+    let currentTheme = "moon_festival";
     let currentIndex = -1;
     let isPlaying = true;
     let intervalSec = 2.5;
     let timerId = null;
-    let countdownStart = 0;
 
     /* DOM 節點 */
     const themeSelect = document.getElementById("themeSelect");
@@ -92,14 +85,12 @@
     const btnTogglePlay = document.getElementById("btnTogglePlay");
     const btnNext = document.getElementById("btnNext");
     const btnFullscreen = document.getElementById("btnFullscreen");
-    const countdownBar = document.getElementById("countdownBar");
     const displayCanvas = document.getElementById("displayCanvas");
     const itemCounter = document.getElementById("itemCounter");
     const itemName = document.getElementById("itemName");
 
     /* ==========================================================================
-       2. 後台自動白底去背演算法 (Flood-fill 泛洪填充)
-       說明：由圖片周圍邊界向內偵測純白底色，掏空為透明，保留物品本身的內部白色
+       2. 後台靜默自動白底去背 (Flood-Fill 邊界演算法)
        ========================================================================== */
     function autoRemoveWhiteBackground(img) {
       const w = img.naturalWidth || img.width;
@@ -114,7 +105,7 @@
       const imgData = ctx.getImageData(0, 0, w, h);
       const data = imgData.data;
       const visited = new Uint8Array(w * h);
-      const tolerance = 32; // 預設最適去背容差
+      const tolerance = 32;
 
       function isWhiteLike(r, g, b) {
         return (r >= 255 - tolerance && g >= 255 - tolerance && b >= 255 - tolerance);
@@ -139,7 +130,7 @@
       while (head < queue.length) {
         const cx = queue[head++];
         const cy = queue[head++];
-        data[(cy * w + cx) * 4 + 3] = 0; // 將底色 Alpha 設為透明
+        data[(cy * w + cx) * 4 + 3] = 0; // Alpha 設為透明
 
         const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
         for (let i = 0; i < 4; i++) {
@@ -161,7 +152,7 @@
     }
 
     /* ==========================================================================
-       3. 抓取 GitHub 倉庫圖片
+       3. 抓取 GitHub 倉庫對應資料夾內的所有圖片
        ========================================================================== */
     async function fetchImagesForTheme(themeKey) {
       const folder = GITHUB_CONFIG.paths[themeKey];
@@ -169,13 +160,13 @@
 
       try {
         const res = await fetch(apiUrl);
-        if (!res.ok) throw new Error("讀取失敗");
+        if (!res.ok) throw new Error("GitHub 連線失敗");
         const files = await res.json();
-        
+
         const validExts = [".png", ".jpg", ".jpeg", ".webp", ".svg"];
         const filtered = files.filter(f => f.type === "file" && validExts.some(ext => f.name.toLowerCase().endsWith(ext)));
 
-        if (filtered.length === 0) throw new Error("目錄內無圖片");
+        if (filtered.length === 0) throw new Error("資料夾內未發現圖片");
 
         imageLists[themeKey] = filtered.map(f => {
           const rawName = f.name.substring(0, f.name.lastIndexOf('.')) || f.name;
@@ -185,41 +176,13 @@
           };
         });
       } catch (err) {
-        // 若 GitHub 尚未填寫正確帳號，以內建模擬題目做示範
-        loadFallbackImages(themeKey);
+        console.warn("GitHub 載入失敗，使用備用本機路徑/預設名稱", err);
+        itemName.textContent = "請確認 GitHub 圖片上傳完成";
       }
-    }
-
-    function loadFallbackImages(themeKey) {
-      if (themeKey === "mid-autumn") {
-        imageLists["mid-autumn"] = ["月餅", "柚子", "玉兔", "嫦娥", "烤肉", "天燈"].map(name => ({
-          name, url: makeDemoSvg(name, "#f59e0b")
-        }));
-      } else {
-        imageLists["food-snacks"] = ["蒟蒻", "茶葉蛋", "手搖飲", "雞塊", "蘋果派", "馬花糋"].map(name => ({
-          name, url: makeDemoSvg(name, "#ef4444")
-        }));
-      }
-    }
-
-    function makeDemoSvg(label, color) {
-      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="600" height="600" viewBox="0 0 600 600">
-        <rect width="600" height="600" fill="#ffffff" />
-        <g stroke="#0f172a" stroke-width="12" stroke-linejoin="round">
-          <ellipse cx="300" cy="300" rx="180" ry="160" fill="${color}" />
-          <circle cx="240" cy="270" r="14" fill="#0f172a"/>
-          <circle cx="360" cy="270" r="14" fill="#0f172a"/>
-          <path d="M 280 320 Q 300 345 320 320" fill="none" stroke="#0f172a" stroke-width="8" stroke-linecap="round"/>
-          <ellipse cx="210" cy="300" rx="16" ry="10" fill="#fb7185" opacity="0.6"/>
-          <ellipse cx="390" cy="300" rx="16" ry="10" fill="#fb7185" opacity="0.6"/>
-        </g>
-        <text x="300" y="520" font-size="38" font-weight="900" fill="#0f172a" text-anchor="middle" font-family="sans-serif">${label}</text>
-      </svg>`;
-      return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
     }
 
     /* ==========================================================================
-       4. 跑馬燈輪播邏輯
+       4. 輪播跑馬燈控制
        ========================================================================== */
     function renderCurrentItem() {
       const list = imageLists[currentTheme] || [];
@@ -231,7 +194,7 @@
 
       const img = new Image();
       img.crossOrigin = "anonymous";
-      img.onload = () => autoRemoveWhiteBackground(img); // 後台靜默去背
+      img.onload = () => autoRemoveWhiteBackground(img);
       img.src = item.url;
     }
 
@@ -249,27 +212,14 @@
         currentIndex = nextIdx;
       }
       renderCurrentItem();
-      resetCountdown();
+      resetTimer();
     }
 
-    function resetCountdown() {
-      countdownStart = performance.now();
+    function resetTimer() {
       if (timerId) clearTimeout(timerId);
-
       if (isPlaying) {
         timerId = setTimeout(pickRandomNext, intervalSec * 1000);
       }
-    }
-
-    function updateProgressAnim(now) {
-      if (isPlaying && intervalSec > 0) {
-        const elapsed = now - countdownStart;
-        const progress = Math.min(elapsed / (intervalSec * 1000), 1);
-        countdownBar.style.width = (progress * 100) + "%";
-      } else if (!isPlaying) {
-        countdownBar.style.width = "0%";
-      }
-      requestAnimationFrame(updateProgressAnim);
     }
 
     function togglePlay() {
@@ -278,7 +228,7 @@
       btnTogglePlay.className = isPlaying
         ? "px-4 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-xs transition"
         : "px-4 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-lg text-xs transition";
-      resetCountdown();
+      resetTimer();
     }
 
     /* ==========================================================================
@@ -296,7 +246,7 @@
     speedSlider.addEventListener("input", (e) => {
       intervalSec = parseFloat(e.target.value);
       speedVal.textContent = intervalSec.toFixed(1) + "s";
-      resetCountdown();
+      resetTimer();
     });
 
     btnTogglePlay.addEventListener("click", togglePlay);
@@ -317,11 +267,10 @@
       else if (e.key === "f" || e.key === "F") { btnFullscreen.click(); }
     });
 
-    // 初始化啟動
+    // 啟動程式
     async function init() {
-      await fetchImagesForTheme("mid-autumn");
+      await fetchImagesForTheme("moon_festival");
       pickRandomNext();
-      requestAnimationFrame(updateProgressAnim);
     }
     init();
   </script>
